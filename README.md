@@ -3,6 +3,11 @@ Contains Hand2Note API for third party tools integration.
 
 Currently available on C# and C++.
 
+**Installation**
+
+For C# copy _bin/x86/h2napi.dll_ and _bin/x64/h2napi.dll_ into the output directory of your project. Add _bin/Hand2Note.Api.dll_ as a dependency to your project. 
+
+
 ## HUD integration
 
 Use it if you need to show dynamic or static HUD in any window or you need to send a hand history to Hand2Note, process it and save it into the database.

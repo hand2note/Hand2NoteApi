@@ -45,7 +45,6 @@ Hand2Note.Send(new HandActionMessage(){...});
 Hand2Note.Send(new HandHistoryMessage(){...});
 
 
-
 //Checks if Hand2Note is running
 if (Hand2Note.IsHand2NoteRunning()){
 ...

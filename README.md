@@ -45,7 +45,8 @@ Hand2Note.Send(new HandDealMessage(){...});
 Hand2Note.Send(new HandActionMessage(){...});
 
 //Sends a "static" hand history to Hand2Note to update players' statistics.
-//Please, note that the hand history should contain information about the original poker room it was played on. Hand2Note uses a prefix in the table name to detect the original room.
+//Please, note that the hand history should contain information about the original poker room it was played on. 
+//Hand2Note uses a prefix in the table name to detect the original room.
 //Use Hand2Note.GetRoomDefiningTableName method to generate a table name with a correspondent room prefix.
 Hand2Note.Send(new HandHistoryMessage(){...});
 

@@ -5,7 +5,7 @@ Currently available on C# and C++.
 
 **Installation**
 
-For C# copy _bin/x86/h2napi.dll_ and _bin/x64/h2napi.dll_ into the output directory of your project. Add _bin/Hand2Note.Api.dll_ as a dependency to your project. 
+For .Net copy _bin/x86/h2napi.dll_ and _bin/x64/h2napi.dll_ into the output directory of your project. Add _bin/Hand2Note.Api.dll_ as a dependency to your project. 
 
 
 ## HUD integration

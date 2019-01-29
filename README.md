@@ -1,4 +1,4 @@
-# Hand2NoteApi
+# Hand2Note API
 Contains Hand2Note API for third party tools integration.
 
 Currently available on C# and C++.
@@ -14,7 +14,7 @@ Use it if you need to show dynamic or static HUD in any window or you need to se
 
 Users will require PokerMaster HUD subscription in order to use this API with your tool on asian poker rooms. Please, do not try to avoid this subscription requirement.
 
-Minimal working example 
+Minimal working example:
 ```C#
 using Hand2Note.Api;
 

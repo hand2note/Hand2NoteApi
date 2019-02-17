@@ -142,6 +142,43 @@ namespace Hand2Note.Api
         }
 
         /// <summary>
+        /// Sends command to Hand2Note to shut down the HUD for tableHWnd
+        /// </summary>
+        /// <param name="tableHWnd">Table Window handle</param>
+        /// <remarks>
+        /// Use this command when the user closes the table but keeps its window open (like on Asian mobile poker rooms)
+        /// to shut down the HUD in Hand2Note.
+        ///
+        /// You don't need to send this message when the table's window was actually closed
+        /// because Hand2Note is able to detect the closed window and shut down the HUD itself.
+        /// </remarks>
+        public static void SendCloseHud(int tableHWnd)
+        {
+            lock (_lockObject)
+            {
+                LazyInitLibrary();
+                _h2nSendCommand(tableHWnd, 0, (int)Commands.CloseHud);
+            }
+        }
+       
+
+        /// <summary>
+        /// Sends command to Hand2Note
+        /// </summary>
+        /// <param name="tableHwnd">Table Window handle</param>
+        /// <param name="room">Poker client room</param>
+        /// <param name="command">Command</param>
+        /// <seealso cref="Commands"/>
+        public static void Send(int tableHwnd, Rooms room, Commands command)
+        {
+            lock (_lockObject)
+            {
+                LazyInitLibrary();
+                _h2nSendCommand(tableHwnd, (int)room, (int)command);
+            }
+        }
+
+        /// <summary>
         /// Convert original Table name to format supported by Hand2Note
         /// </summary>
         /// <remarks>
@@ -206,6 +243,7 @@ namespace Hand2Note.Api
             _h2nSendHandStart = (h2n_send_hand_start)LoadDelegate<h2n_send_hand_start>(addr, "h2n_send_hand_start");
             _h2nSendHandAction = (h2n_send_action)LoadDelegate<h2n_send_action>(addr, "h2n_send_action");
             _h2nSendHandStreet = (h2n_send_street)LoadDelegate<h2n_send_street>(addr, "h2n_send_street");
+            _h2nSendCommand = (h2n_send_command)LoadDelegate<h2n_send_command>(addr, "h2n_send_command");
 
             _dllAddress = addr;
         }
@@ -230,6 +268,10 @@ namespace Hand2Note.Api
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr h2n_make_table_name(int room, IntPtr UTF8TableName);
         private static h2n_make_table_name _h2nMakeTableName = null;
+
+        [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+        private delegate int h2n_send_command(int table_hwnd, int room_id, int cmd);
+        private static h2n_send_command _h2nSendCommand = null;
 
         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
         private delegate IntPtr h2n_free_cstring(IntPtr UTF8TableName);

@@ -610,6 +610,36 @@ Seat 8: 德州小丑王 (small blind) folded on the Turn
         }
     }
 
+    [TestClass]
+    public class H2NApiSendCommand
+    {
+        public H2NApiSendCommand()
+        {
+            Hand2Note.DLLPath = FileSysHelpers.Hand2NoteApiDLLPath;
+            // free dll before test cases
+            Hand2Note.FreeLibrary();
+        }
+
+
+        [TestMethod]
+        public void TestCloseHudCommand()
+        {
+            Hand2Note.Send(123, Rooms.FishPokers, Commands.CloseHud);
+        }
+
+        [TestMethod]
+        public void TestSendCloseHudCommand()
+        {
+            Hand2Note.SendCloseHud(123);
+        }
+
+        [TestMethod]
+        public void TestTableNeedReopenCommand()
+        {
+            Hand2Note.Send(123, Rooms.FishPokers, Commands.TableNeedsReopen);
+        }
+    }
+
     public class MurmurHash
     {
         public UInt32 Hash(string str)

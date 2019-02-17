@@ -112,6 +112,9 @@ extern "C" {
 #define H2N_STREET_TURN 4
 #define H2N_STREET_RIVER 5
 
+#define H2N_COMMAND_CLOSEHUD 0
+#define H2N_COMMAND_REOPENTABLE 3
+
 #define H2N_MAX_SEATS 10
 
 typedef struct {
@@ -192,6 +195,7 @@ H2N_API int h2n_send_hand_start(h2n_start_hand_message* msg);
 H2N_API int h2n_send_action(h2n_action_message* msg);
 H2N_API int h2n_send_street(h2n_street_message* msg);
 H2N_API int h2n_send_json(const char* json_str);
+H2N_API int h2n_send_command(int table_hwnd, int room_id, int cmd);
 
 
 

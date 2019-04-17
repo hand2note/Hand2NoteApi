@@ -56,6 +56,14 @@ namespace Hand2Note.Api
         /// </summary>
         public bool IsPotLimit { set; get; } = false;
         /// <summary>
+        /// Is it short deck holdem game
+        /// </summary>
+        public bool IsShortDeck { set; get; } = false;
+        /// <summary>
+        /// Is it omaha5 game
+        /// </summary>
+        public bool IsOmahaFive { set; get; } = false;
+        /// <summary>
         /// Room currency
         /// </summary>
         public Currencies Currency { set; get; } = Currencies.Dollar;

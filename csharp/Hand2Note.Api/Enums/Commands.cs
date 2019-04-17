@@ -18,5 +18,10 @@
         /// Hand2Note shows message in the table's HUD: "Please, reopen the table."
         /// </summary>
         TableNeedsReopen = 3,
+
+        /// <summary>
+        /// Hand2Note shows message in the table's HUD: "Please, restart emulator."
+        /// </summary>
+        EmulatorNeedRestart = 4,
     }
 }

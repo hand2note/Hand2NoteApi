@@ -3,1027 +3,496 @@
 
 #include "h2napi.h"
 #include <thread>
-#include <mutex>
 #include <atomic>
 #include <string>
 #include <vector>
-#include <condition_variable>
-
 namespace Hand2Note {
 
-	/// <summary>
-	/// Hand history text formats supported by Hand2Note. Used to send completed hands.
-	/// </summary>
-	enum class HandHistoryFormats : int
-	{
-		Original = 0,
-		Stars = 1,
-		Pacific = 2,
-		WPN = 3
-	};
-
-	/// <summary>
-	/// Supported poker rooms
-	/// </summary>
-	enum class Rooms : int
-	{
-		Unrecognized = 0,
-		PokerStars = 10,
-		Pacific = 14,
-		IPoker = 13,
-		PartyPoker = 11,
-		WinningPokerNetwork = 15,
-		Winamax = 9,
-		Microgaming = 7,
-		Baazi = 1,
-		CheckRaise = 2,
-		Dollaro = 12,
-		BetSense = 3,
-		MonkeyBet = 4,
-		Fulpot = 5,
-		GGNet = 16,
-		EnetPoker = 17,
-		KlasPoker = 18,
-		PokerWorld = 19,
-		Ourgame = 20,
-		BetOnline = 21,
-		BIGBETGE = 22,
-		BluffOnline = 23,
-		BluffDaddy = 24,
-		ColombiaPokerLive = 25,
-		EuropeBetCom = 26,
-		FTRPoker = 27,
-		PokerGDFPLAY = 28,
-		Highrollers = 29,
-		ItalyLivePoker = 30,
-		PokerMania = 31,
-		PokerMIRA = 32,
-		PokerDom = 33,
-		Pokermatch = 34,
-		RedArgentinaDePoker = 35,
-		SekaBETCom = 36,
-		Sekabet = 37,
-		SpartanPokerCom = 38,
-		SportsBetting = 39,
-		TigerGaming = 40,
-		VenezuelaPokerLive = 41,
-		XMaster = 42,
-		PokerGrant = 43,
-		GrandPokerEu = 44,
-		Revolutionbets = 45,
-		Vbet = 46,
-		Win2Day = 47,
-		WWin = 48,
-		PokerMaster = 49,
-		PlanetWin365 = 50,
-		AconcaguaPoker = 51,
-		BrasilPokerLive = 52,
-		SurPokerDeLasAmericas = 53,
-		ChilePokerLive = 54,
-		BoliviaPokerLive = 55,
-		CostaRicaPokerLive = 56,
-		GuaraniPokerLive = 57,
-		MexicoPokerLive = 58,
-		PeruPokerLive = 59,
-		PPPoker = 60,
-		PokerKingdom = 61,
-		PokerKing = 62,
-		FishPokers = 63,
-		OhPoker = 64,
-		OnePS = 65,
-		PokerClans = 66,
-		KKPoker = 67
-	};
-
-	/// <summary>
-	/// Currencies supported by Hand2Note. Used in HandStart messages.
-	/// </summary>
-	enum class Currencies : int
-	{
-		Dollar = 1,
-		Euro = 2,
-		Pound = 3,
-		PlayMoney = 4,
-		Points = 5,
-		Chips = 6,
-		Yuan = 7,
-		IndianRupee = 8,
-		Hryvnia = 9,
-		Rouble = 10,
-		GeorgianLari = 11,
-		Undefined = 0
-	};
-
-	/// <summary>
-	/// Poker actions 
-	/// </summary>
-	enum class Actions : int
-	{
-		Fold = 0,
-		Call = 1,
-		Raise = 2,
-		Check = 3,
-		Bet = 4
-	};
-
-	/// <summary>
-	/// Streets
-	/// </summary>
-	enum class Streets : int
-	{
-		Preflop = 0,
-		Flop = 3,
-		Turn = 4,
-		River = 5
-	};
-
-	/// <summary>
-	/// Commands to Hand2Note
-	/// </summary>
-	enum class Commands : int
-	{
-		/// <summary>
-		/// Command used when poker table inside emulator has been closed
-		/// </summary>
-		CloseHud = 0,
-		/// <summary>
-		/// Command used when converter or module started after initial table packets and seating state is undefined
-		/// </summary>
-		ReopenTable = 3,
-	};
-
-	/// <summary>
-	/// Hand2Note activity monitor. Contains methods for checking if Hand2Note is running, events for Hand2Note start and/or close.
-	/// </summary>
-	class ActivityMonitor 
-	{
+	class ClientStatusChecker {
 	public:
-		
-		/// <summary>
-		/// Constructor
-		/// </summary>
-		/// <param name="immediateOnStart">if true and Hand2Note running, OnHand2NoteStart fired immediately</param>
-		ActivityMonitor(bool immediateOnStart = true) : _immediateOnStart(immediateOnStart)
-		{
-			poll_thread_ = std::thread([this]() { Loop(); });
-		}
+		virtual ~ClientStatusChecker() {}
 
-		virtual ~ActivityMonitor() {
-			{
-				std::unique_lock<std::mutex> lock{ mutex_ };
-				is_stop_ = true;
-			}
-			cvar_.notify_one();
+		bool IsRunning() const {
+			return h2n_is_running() != 0;
+		}
+	};
+
+	class ClientControl : public ClientStatusChecker {
+	public:
+
+		virtual void OnStart() = 0;
+		virtual void OnClose() = 0;
+
+		ClientControl() :loop_(true) {
+			poll_thread_ = std::thread([this]() { DoWork(); });
+		}
+		
+		virtual ~ClientControl() {
+			loop_ = false;
 			poll_thread_.join();
 		}
 
-		/// <summary>
-		/// Checks if Hand2Note is running
-		/// </summary>
-		static inline bool IsHand2NoteRunning() {
-			return h2n_is_running();
-		}
-
-		/// <summary>
-		/// Time interval between IsHand2NoteRunning calls, used to fire <c>Hand2NoteStarted</c> and <c>OnHand2NoteClosed</c> events
-		/// </summary>
-		int PollDelay() const {
-			return _pollDelay;
-		}
-		/// <summary>
-		/// Time interval between IsHand2NoteRunning calls, used to fire <c>Hand2NoteStarted</c> and <c>OnHand2NoteClosed</c> events
-		/// </summary>
-		void PollDelay(int pollDelay) {
-			_pollDelay = pollDelay;
-		}
-
-
-		/// <summary>
-		/// Fired on when Hand2Note client is started
-		/// </summary>
-		/// <remarks>
-		/// Fired immediately if ActivityMonitor was created with immediateOnStart == true
-		/// </remarks>
-		virtual void Hand2NoteStarted() {}
-		/// <summary>
-		/// Fired when Hand2Note client becomes closed
-		/// </summary>
-		virtual void Hand2NoteClosed() {}
-
 	private:
-		int _pollDelay{ 300 };
-		std::thread poll_thread_;
-		bool _immediateOnStart;
-		bool _isRunning{ false };
-		std::mutex mutex_;
-		std::condition_variable cvar_;
-		bool is_stop_{ false };
 
-		void Loop()
-		{
-			_isRunning = IsHand2NoteRunning();
-			if (_immediateOnStart && _isRunning)
-			{
-				Hand2NoteStarted();
-			}
-			for (;;) {
-				{
-					std::unique_lock<std::mutex> lock{ mutex_ };
-					if (cvar_.wait_for(lock, std::chrono::milliseconds(_pollDelay), [this]() { return is_stop_; }))
-						break;
-				}
-				auto currState = IsHand2NoteRunning();
-				if (currState == _isRunning)
+		void DoWork() {
+			using namespace std::literals;
+			is_running_ = IsRunning();
+			if (is_running_)
+				OnStart();
+
+			while (loop_) {
+				std::this_thread::sleep_for(300ms);
+				bool curr = IsRunning();
+				if (curr == is_running_)
 					continue;
-				_isRunning = currState;
-				if (_isRunning)
-					Hand2NoteStarted();
+				is_running_ = curr;
+				if (is_running_)
+					OnStart();
 				else
-					Hand2NoteClosed();
+					OnClose();
 			}
 		}
+
+		bool is_running_;
+		std::atomic_bool loop_;
+		std::thread poll_thread_;
 
 	};
 
-	/// <summary>
-	/// Convert original Table name to format supported by Hand2Note
-	/// </summary>
-	/// <remarks>
-	/// Hand2Note is built on the assumption that hand history contains all the information required to completely define a hand including its original Room. 
-	/// Usually converted hand history doesn't define its original poker room. So, we use a prefix for a table name to store this information.
-	/// Hand2Note reads target room from table name 'XXXXnnnnnnnn'
-	/// where 'XXXX' is room prefix, 'nnnnnnnn' is some numeric hash code from original table name.
-	/// </remarks>
-	/// <param name="room">Original poker room</param>
-	/// <param name="originalTableName">Original table name</param>
-	/// <returns>Table name supported by Hand2Note</returns>
-	static inline std::string GetRoomDefiningTableName(Rooms room, const std::string& originalTableName)
-	{
-		char *pTableName = h2n_make_table_name((int)room, originalTableName.c_str());
-		std::string ret{ pTableName };
-		h2n_free_cstring(pTableName);
-		return ret;
-	}
 
-
-	/// <summary>
-	/// Send message with completed (static) hand history text to Hand2Note. 
-	/// </summary>
-	class HandHistoryMessage
+	enum class HandHistoryFormat : int
 	{
+		PokerStars = H2N_HHFMT_STARS,
+		Pacific = H2N_HHFMT_PACIFIC,
+		WPN = H2N_HHFMT_WPN,
+	};
+
+	enum class Room : int
+	{
+		PokerStars = H2N_ROOM_POKERSTARS,
+		Pacific = H2N_ROOM_PACIFIC,
+		PokerMaster = H2N_ROOM_POKERMASTER,
+		PokerFish = H2N_ROOM_FISHPOKERS,
+	};
+
+	enum class Currency : int
+	{
+		Dollar = H2N_CURRENCY_DOLLAR,
+		Euro = H2N_CURRENCY_EURO,
+		Pounds = H2N_CURRENCY_POUND,
+		Chips = H2N_CURRENCY_CHIPS,
+		Yuan = H2N_CURRENCY_YUAN,
+		IndianRupee = H2N_CURRENCY_INDIANRUPEE,
+		Hryvnia = H2N_CURRENCY_HRYVNIA,
+		Rouble = H2N_CURRENCY_ROUBLE,
+		GeorgianLari = H2N_CURRENCY_GEORGIANLARI,
+	};
+
+	class Utils {
 	public:
-		/// <summary>
-		/// Target room
-		/// </summary>
-		Rooms Room() const {
-			return room_;
+		inline static std::string MakeTableName(Room room, const std::string& OriginalTableName) {
+			char *tn = h2n_make_table_name((int)room, OriginalTableName.c_str());
+			std::string ret(tn);
+			h2n_free_cstring(tn);
+			return ret;
 		}
-		/// <summary>
-		/// Target room
-		/// </summary>
-		void Room(Rooms room) {
-			room_ = room;
+	};
+
+	class HandHistoryMessage {
+	public:
+		HandHistoryMessage() :
+			room_(Room::PokerStars), format_(HandHistoryFormat::PokerStars), game_id_(0), is_zoom_(false)
+		{
 		}
 
-		/// <summary>
-		/// Game/Hand Index
-		/// </summary>
-		uint64_t GameNumber() const {
-			return game_id_;
-		}
-		/// <summary>
-		/// Game/Hand Index
-		/// </summary>
-		void GameNumber(uint64_t gameNumber) {
-			game_id_ = gameNumber;
+		HandHistoryMessage(Room room, uint64_t game_id, HandHistoryFormat format, const std::string& FormattedHandHistory) :
+			room_(room), format_(format), game_id_(game_id), fhh_(FormattedHandHistory), is_zoom_(false)
+		{
 		}
 
-		/// <summary>
-		/// Is fastfold, zoom, boost table
-		/// </summary>
-		bool IsZoom() const {
-			return is_zoom_;
-		}
-		void SetZoom(bool isZoom = true) {
-			is_zoom_ = isZoom;
-		}
+		const std::string& FormattedHandHistory() const { return fhh_; }
+		void FormattedHandHistory(const std::string& FormattedHandHistory_) { fhh_ = FormattedHandHistory_; }
 
-		/// <summary>
-		/// <c>HandHistory</c> text format, PS/888/WPN 
-		/// </summary>
-		HandHistoryFormats Format() const {
-			return format_;
-		}
-		/// <summary>
-		/// <c>HandHistory</c> text format, PS/888/WPN 
-		/// </summary>
-		void Format(HandHistoryFormats format) {
-			format_ = format;
-		}
+		Room room() const { return room_; }
+		void room(Room r) { room_ = r; }
 
-		/// <summary>
-		/// Completed hand history
-		/// </summary>
-		const std::string& HandHistory() const {
-			return fhh_;
-		}
-		/// <summary>
-		/// Completed hand history
-		/// </summary>
-		void HandHistory(const std::string& handHistory) {
-			fhh_ = handHistory;
-		}
+		bool IsZoom() const { return is_zoom_; }
+		void SetZoom(bool z) { is_zoom_ = z; }
 
-		/// <summary>
-		/// Original hand history text if there is any
-		/// </summary>
-		const std::string& OriginalHandHistory() const {
-			return ohh_;
-		}
-		/// <summary>
-		/// Original hand history text if there is any
-		/// </summary>
-		void OriginalHandHistory(const std::string& originalHandHistory) {
-			ohh_ = originalHandHistory;
-		}
+		HandHistoryFormat Format() const { return format_; }
+		void Format(HandHistoryFormat f) { format_ = f; }
 
+		uint64_t GameId() const { return game_id_; }
+		void GameId(uint64_t id) { game_id_ = id; }
 
-		HandHistoryMessage() { }
+		const std::string& OriginalHandHistory() const { return ohh_; }
+		void OriginalHandHistory(const std::string& hh) { ohh_ = hh; }
 	private:
 		std::string fhh_;
 		std::string ohh_;
-		HandHistoryFormats format_{ HandHistoryFormats::Original };
-		Rooms room_{ Rooms::Unrecognized };
-		uint64_t game_id_{ 0 };
-		bool is_zoom_{ false };
+		HandHistoryFormat format_;
+		Room room_;
+		uint64 game_id_;
+		bool is_zoom_;
+
+		void MakeH2NApiLibMessage(h2n_hh_message* msg) const {
+			msg->format = (int)format_;
+			msg->gameid = (double) game_id_;
+			msg->is_zoom = is_zoom_ ? 1 : 0;
+			msg->room = (int)room_;
+			msg->hh_formatted = fhh_.c_str();
+			msg->hh_original = ohh_.c_str();
+		}
+
+		friend class Protocol;
 	};
 
-	static inline int Send(const HandHistoryMessage& msg)
-	{
-		h2n_hh_message m;
-		m.format = (int)msg.Format();
-		m.gameid = (double)msg.GameNumber();
-		m.hh_formatted = msg.HandHistory().c_str();
-		m.hh_original = msg.OriginalHandHistory().c_str();
-		m.is_zoom = msg.IsZoom() ? 1 : 0;
-		m.room = (int)msg.Room();
-		return h2n_send_handhistory(&m);
-	}
 
-	/// <summary>
-	/// Seat data class, used in <c>HandStartMessage</c>. Contains nickname, index, stack, blinds etc
-	/// </summary>
-	class PlayerSeatInfo
-	{
+	class SeatInfo {
 	public:
-		/// <summary>
-		/// Seat index in range [0..MaxPlayers-1]. SeatIndex == 0 if the seat is at 18 o'clock.
-		/// </summary>
-		int SeatIndex() const {
-			return seat_idx_;
-		}
-		/// <summary>
-		/// Seat index in range [0..MaxPlayers-1]. SeatIndex == 0 if the seat is at 18 o'clock.
-		/// </summary>
-		void SeatIndex(int seatIndex) {
-			seat_idx_ = seatIndex;
+		SeatInfo() :
+			seat_idx_(0), stack_(0), is_hero_(false), player_id_(0), is_dealer_(false), 
+			is_posted_bb_(false), is_posted_sb_(false), is_posted_bb_outofqueue_(false), 
+			is_posted_sb_outofqueue_(false), is_posted_straddle_(false), is_sitting_out_(false)
+		{
 		}
 
-		/// <summary>
-		/// Player nickname. On Chinese poker rooms this should be the visible nickname of the player, i.e. those one usually in Chinese letters.
-		/// </summary>
-		const std::string& Nickname() const {
-			return nickname_;
-		}
-		/// <summary>
-		/// Player nickname. On Chinese poker rooms this should be the visible nickname of the player, i.e. those one usually in Chinese letters.
-		/// </summary>
-		void Nickname(const std::string& nickname) {
-			nickname_ = nickname;
+		SeatInfo(const std::string& name, int index, double stack, bool is_hero = false):
+			nickname_(name), seat_idx_(index), stack_(stack), is_hero_(is_hero),
+			player_id_(0), is_dealer_(false), is_posted_bb_(false), is_posted_sb_(false),
+			is_posted_bb_outofqueue_(false), is_posted_sb_outofqueue_(false), is_posted_straddle_(false),
+			is_sitting_out_(false)
+		{
 		}
 
-		/// <summary>
-		/// Player ID used in china rooms, set it if possible or use hash code from nickname
-		/// </summary>
-		const std::string& PlayerShowId() const {
-			return player_id_;
-		}
-		/// <summary>
-		/// Player ID used in china rooms, set it if possible or use hash code from nickname
-		/// </summary>
-		void PlayerShowId(const std::string& playerId) {
-			player_id_ = playerId;
+		SeatInfo(uint64 player_id, int index, double stack, bool is_hero = false): 
+			seat_idx_(index), stack_(stack), is_hero_(is_hero),
+			player_id_(player_id), is_dealer_(false), is_posted_bb_(false), is_posted_sb_(false),
+			is_posted_bb_outofqueue_(false), is_posted_sb_outofqueue_(false), is_posted_straddle_(false),
+			is_sitting_out_(false)
+		{
 		}
 
+		int SeatIndex() const { return seat_idx_; }
+		void SeatIndex(int idx) { seat_idx_ = idx; }
 
-		/// <summary>
-		/// Starting stack size, before blinds and ante
-		/// </summary>
-		double InitialStackSize() const {
-			return stack_;
-		}
-		/// <summary>
-		/// Starting stack size, before blinds and ante
-		/// </summary>
-		void InitialStackSize(double stack) {
-			stack_ = stack;
-		}
+		const std::string& Nickname() const { return nickname_; }
+		void Nickname(const std::string& nick) { nickname_ = nick; }
 
-		/// <summary>
-		/// Poket cards string in common format : '6sKcTdAh'. Can be empty even if <c>IsHero</c> set to true
-		/// </summary>
-		const std::string& PoketCards() const {
-			return pocket_cards_;
-		}
-		/// <summary>
-		/// Poket cards string in common format : '6sKcTdAh'. Can be empty even if <c>IsHero</c> set to true
-		/// </summary>
-		void PoketCards(const std::string& cards) {
-			pocket_cards_ = cards;
-		}
+		uint64 PlayerId() const { return player_id_; }
+		void PlayerId(uint64 pid) { player_id_ = pid; }
 
-		/// <summary>
-		/// Player is a dealer/button
-		/// </summary>
-		bool IsDealer() const {
-			return is_dealer_;
-		}
-		/// <summary>
-		/// Player is a dealer/button
-		/// </summary>
-		void SetDealer(bool isDealer = true) {
-			is_dealer_ = isDealer;
-		}
+		double Stack() const { return stack_; }
+		void Stack(double s) { stack_ = s; }
 
+		const std::string& PoketCards() const { return pocket_cards_; }
+		void PoketCards(const std::string& pocket_cards) { pocket_cards_ = pocket_cards; }
 
-		/// <summary>
-		/// Seat posted small blind
-		/// </summary>
-		bool IsPostedSmallBlind() const {
-			return is_posted_sb_;
-		}
-		/// <summary>
-		/// Seat posted small blind
-		/// </summary>
-		void SetPostedSmallBlind(bool isPostedSmallBlind = true) {
-			is_posted_sb_ = isPostedSmallBlind;
-		}
+		bool IsDealer() const { return is_dealer_; }
+		void SetDealer(bool is_dealer) { is_dealer_ = is_dealer; }
 
-		/// <summary>
-		/// Seat posted big blind
-		/// </summary>
-		bool IsPostedBigBlind() const {
-			return is_posted_bb_;
-		}
-		/// <summary>
-		/// Seat posted big blind
-		/// </summary>
-		void SetPostedBigBlind(bool isPostedBigBlind = true) {
-			is_posted_bb_ = isPostedBigBlind;
-		}
+		bool IsHero() const { return is_hero_; }
+		void SetHero(bool hero) { is_hero_ = hero; }
 
-		/// <summary>
-		/// Seat posted small blind out of queue, usually dead blind
-		/// </summary>
-		bool IsPostedSmallBlindOutOfQueue() const {
-			return is_posted_sb_outofqueue_;
-		}
-		/// <summary>
-		/// Seat posted small blind out of queue, usually dead blind
-		/// </summary>
-		void SetPostedSmallBlindOutOfQueue(bool isPostedSmallBlindOutOfQueue = true) {
-			is_posted_sb_outofqueue_ = isPostedSmallBlindOutOfQueue;
-		}
+		bool IsPostedSmallBlind() const { return is_posted_sb_; }
+		void SetPostedSmallBlind(bool posted) { is_posted_sb_ = posted; }
 
-		/// <summary>
-		/// Seat posted big blind out of queue, entry bet
-		/// </summary>
-		bool IsPostedBigBlindOutOfQueue() const {
-			return is_posted_bb_outofqueue_;
-		}
-		/// <summary>
-		/// Seat posted big blind out of queue, entry bet
-		/// </summary>
-		void SetPostedBigBlindOutOfQueue(bool isPostedBigBlindOutOfQueue = true) {
-			is_posted_bb_outofqueue_ = isPostedBigBlindOutOfQueue;
-		}
+		bool IsPostedBigBlind() const { return is_posted_bb_; }
+		void SetPostedBigBlind(bool posted) { is_posted_bb_ = posted; }
 
-		/// <summary>
-		/// Seat posted straddle
-		/// </summary>
-		bool IsPostedStraddle() const {
-			return is_posted_straddle_;
-		}
-		/// <summary>
-		/// Seat posted straddle
-		/// </summary>
-		void SetPostedStraddle(bool isPostedStraddle = true) {
-			is_posted_straddle_ = isPostedStraddle;
-		}
+		bool IsPostedBigBlindOutOfQueue() const { return is_posted_bb_outofqueue_; }
+		void SetPostedBigBlindOutOfQueue(bool posted) { is_posted_bb_outofqueue_ = posted; }
 
-		/// <summary>
-		/// Seat is hero, important flag used to arrange huds around preferred seat.
-		/// </summary>
-		bool IsHero() const {
-			return is_hero_;
-		}
-		/// <summary>
-		/// Seat is hero, important flag used to arrange huds around preferred seat.
-		/// </summary>
-		void SetHero(bool isHero = true) {
-			is_hero_ = isHero;
-		}
+		bool IsPostedSmallBlindOutOfQueue() const { return is_posted_sb_outofqueue_; }
+		void SetPostedSmallBlindOutOfQueue(bool posted) { is_posted_sb_outofqueue_ = posted; }
 
-		/// <summary>
-		/// Seat is sitting out
-		/// </summary>
-		bool IsSittingOut() const {
-			return is_sitting_out_;
-		}
-		/// <summary>
-		/// Seat is sitting out
-		/// </summary>
-		void SetSittingOut(bool isSittingOut = true) {
-			is_sitting_out_ = isSittingOut;
-		}
+		bool IsPostedStaddle() const { return is_posted_straddle_; }
+		void SetPostedStraddle(bool posted) { is_posted_straddle_ = posted; }
 
-		PlayerSeatInfo() { }
+		bool IsSittingOut() const { return is_sitting_out_; }
+		void SetSittingOut(bool sitout) { is_sitting_out_ = sitout; }
+
 	private:
-		int          seat_idx_{ -1 };
+		int          seat_idx_;
 		std::string  nickname_;
-		std::string  player_id_;
-		double       stack_{ 0 };
+		uint64       player_id_;
+		double       stack_;
 		std::string  pocket_cards_;
-		bool         is_dealer_{ false };
-		bool         is_posted_sb_{ false };
-		bool         is_posted_bb_{ false };
-		bool         is_posted_sb_outofqueue_{ false };
-		bool         is_posted_bb_outofqueue_{ false };
-		bool         is_posted_straddle_{ false };
-		bool         is_hero_{ false };
-		bool         is_sitting_out_{ false };
-	};
-
-
-	/// <summary>
-	/// Send dynamic hand start message to Hand2Note
-	/// </summary>
-	/// <seealso cref="HandActionMessage"/>
-	/// <seealso cref="HandDealMessage"/>
-	class HandStartMessage
-	{
-	public:
-		using SeatsList = std::vector<PlayerSeatInfo>;
-
-		/// <summary>
-		/// Target room
-		/// </summary>
-		Rooms Room() const {
-			return room_;
-		}
-		/// <summary>
-		/// Target room
-		/// </summary>
-		void Room(Rooms room) {
-			room_ = room;
-		}
-
-		/// <summary>
-		/// Game/Hand number
-		/// </summary>
-		uint64_t GameNumber() const {
-			return game_id_;
-		}
-		/// <summary>
-		/// Game/Hand number
-		/// </summary>
-		void GameNumber(uint64_t gameNumber) {
-			game_id_ = gameNumber;
-		}
-
-		/// <summary>
-		/// Table name in supported format, see <see cref="Hand2Note.GetRoomDefiningTableName(Rooms, string)"/>
-		/// </summary>
-		const std::string& TableName() const {
-			return table_name_;
-		}
-		/// <summary>
-		/// Table name in supported format, see <see cref="Hand2Note.GetRoomDefiningTableName(Rooms, string)"/>
-		/// </summary>
-		void TableName(const std::string& tableName) {
-			table_name_ = tableName;
-		}
-
-		/// <summary>
-		/// Table window handle (HWND) ( where to attach huds )
-		/// </summary>
-		int TableWindowHwnd() const {
-			return table_hwnd_;
-		}
-		/// <summary>
-		/// Table window handle (HWND) ( where to attach huds )
-		/// </summary>
-		void TableWindowHwnd(int hwnd) {
-			table_hwnd_ = hwnd;
-		}
-
-		/// <summary>
-		/// Table max players. 2-max, 6-max, 9-max etc
-		/// </summary>
-		int TableSize() const {
-			return max_players_;
-		}
-		/// <summary>
-		/// Table max players. 2-max, 6-max, 9-max etc
-		/// </summary>
-		void TableSize(int tableSize) {
-			max_players_ = tableSize;
-		}
-
-		/// <summary>
-		/// Is it tournament hand 
-		/// </summary>
-		bool IsTourney() const {
-			return is_tourney_;
-		}
-		/// <summary>
-		/// Is it tournament hand 
-		/// </summary>
-		void SetTourney(bool isTourney) {
-			is_tourney_ = isTourney;
-		}
-
-		/// <summary>
-		/// Is it omaha hand
-		/// </summary>
-		bool IsOmaha() const {
-			return is_omaha_;
-		}
-		/// <summary>
-		/// Is it omaha hand
-		/// </summary>
-		void SetOmaha(bool isOmaha) {
-			is_omaha_ = isOmaha;
-		}
-
-		/// <summary>
-		/// Is it fixed limit game
-		/// </summary>
-		bool IsLimit() const {
-			return is_limit_;
-		}
-		/// <summary>
-		/// Is it fixed limit game
-		/// </summary>
-		void SetLimit(bool isLimit) {
-			is_limit_ = isLimit;
-		}
-
-		/// <summary>
-		/// Is it zoom/fastfold/boost hand
-		/// </summary>
-		bool IsZoom() const {
-			return is_zoom_;
-		}
-		/// <summary>
-		/// Is it zoom/fastfold/boost hand
-		/// </summary>
-		void SetZoom(bool isZoom) {
-			is_zoom_ = isZoom;
-		}
-
-		/// <summary>
-		/// Is there a cap 
-		/// </summary>
-		bool IsCap() const {
-			return is_cap_;
-		}
-		/// <summary>
-		/// Is there a cap 
-		/// </summary>
-		void SetCap(bool isCap) {
-			is_cap_ = isCap;
-		}
-
-		/// <summary>
-		/// Is it pot limit game
-		/// </summary>
-		bool IsPotLimit() const {
-			return is_potlimit_;
-		}
-		/// <summary>
-		/// Is it pot limit game
-		/// </summary>
-		void SetPotLimit(bool isPotLimit) {
-			is_potlimit_ = isPotLimit;
-		}
-
-		/// <summary>
-		/// Room currency
-		/// </summary>
-		Currencies Currency() const {
-			return currency_;
-		}
-		/// <summary>
-		/// Room currency
-		/// </summary>
-		void Currency(Currencies currency) {
-			currency_  = currency;
-		}
-
-		/// <summary>
-		/// Small blind amount
-		/// </summary>
-		double SmallBlind() const {
-			return sb_;
-		}
-		/// <summary>
-		/// Small blind amount
-		/// </summary>
-		void SmallBlind(double sb) {
-			sb_ = sb;
-		}
-
-		/// <summary>
-		/// Big blind amount
-		/// </summary>
-		double BigBlind() const {
-			return bb_;
-		}
-		/// <summary>
-		/// Big blind amount
-		/// </summary>
-		void BigBlind(double bb) {
-			bb_ = bb;
-		}
-
-		/// <summary>
-		/// Ante amount
-		/// </summary>
-		double Ante() const {
-			return ante_;
-		}
-		/// <summary>
-		/// Ante amount
-		/// </summary>
-		void Ante(double ante) {
-			ante_ = ante;
-		}
-
-		/// <summary>
-		/// Straddle amount
-		/// </summary>
-		double Straddle() const {
-			return straddle_;
-		}
-		/// <summary>
-		/// Straddle amount
-		/// </summary>
-		void Straddle(double straddle) {
-			straddle_ = straddle;
-		}
-
-		/// <summary>
-		/// List of table seats.
-		/// </summary>
-		SeatsList& Seats() {
-			return seats_;
-		}
-		/// <summary>
-		/// List of table seats.
-		/// </summary>
-		const SeatsList& Seats() const {
-			return seats_;
-		}
-
-		HandStartMessage() { }
-
-	private:
-		Rooms       room_{ Rooms::Unrecognized };
-		uint64_t    game_id_{ 0 };
-		std::string table_name_;
-		int         table_hwnd_{ 0 };
-		int         max_players_{ 9 };
-		bool        is_tourney_{ false };
-		bool        is_omaha_{ false };
-		bool        is_limit_{ false };
-		bool        is_zoom_{ false };
-		bool        is_cap_{ false };
-		bool        is_potlimit_{ false };
-		Currencies  currency_{ Currencies::Dollar };
-		double      sb_{ 0 };
-		double      bb_{ 0 };
-		double      ante_{ 0 };
-		double      straddle_{ 0 };
-		SeatsList   seats_;
-	};
-
-	static inline int Send(const HandStartMessage& msg)
-	{
-		h2n_start_hand_message m;
-		m.ante = msg.Ante();
-		m.bb = msg.BigBlind();
-		m.currency = (int)msg.Currency();
-		m.gameid = (double)msg.GameNumber();
-		m.is_cap = msg.IsCap() ? 1 : 0;
-		m.is_limit = msg.IsLimit() ? 1 : 0;
-		m.is_omaha = msg.IsOmaha() ? 1 : 0;
-		m.is_potlimit = msg.IsPotLimit() ? 1 : 0;
-		m.is_tourney = msg.IsTourney() ? 1 : 0;
-		m.is_zoom = msg.IsZoom() ? 1 : 0;
-		m.max_players = msg.TableSize();
-		m.room = (int)msg.Room();
-		m.sb = msg.SmallBlind();
-		m.straddle = msg.Straddle();
-		m.table_hwnd = msg.TableWindowHwnd();
-		m.table_name = msg.TableName().c_str();
-
-		m.seats_num = 0;
-		for (HandStartMessage::SeatsList::const_iterator it =  msg.Seats().cbegin(); it != msg.Seats().cend(); ++it) {
-			const PlayerSeatInfo& seat = *it;
-			h2n_seat_info *s = &(m.seats[m.seats_num++]);
-
-			s->is_dealer = seat.IsDealer() ? 1 : 0;
-			s->is_hero = seat.IsHero() ? 1 : 0;
-			s->is_posted_bb = seat.IsPostedBigBlind() ? 1 : 0;
-			s->is_posted_bb_outofqueue = seat.IsPostedBigBlindOutOfQueue()  ? 1 : 0;
-			s->is_posted_sb = seat.IsPostedSmallBlind() ? 1 : 0;
-			s->is_posted_sb_outofqueue = seat.IsPostedSmallBlindOutOfQueue()  ? 1 : 0;
-			s->is_posted_straddle = seat.IsPostedStraddle() ? 1 : 0;
-			s->is_sitting_out = seat.IsSittingOut() ? 1 : 0;
-			s->nickname = seat.Nickname().c_str();
-			s->player_id = seat.PlayerShowId().c_str();
-			s->pocket_cards = seat.PoketCards().c_str();
-			s->seat_idx = seat.SeatIndex();
-			s->stack = seat.InitialStackSize();
-		}
+		bool         is_dealer_;
+		bool         is_posted_sb_;
+		bool         is_posted_bb_;
+		bool         is_posted_sb_outofqueue_;
+		bool         is_posted_bb_outofqueue_;
+		bool         is_posted_straddle_;
+		bool         is_hero_;
+		bool         is_sitting_out_;
 		
-		return h2n_send_hand_start(&m);
-	}
-
-
-
-	/// <summary>
-	/// Send dynamic poker action message to Hand2Note, used with <see cref="HandDealMessage"/> to maintain dynamic deal state after <see cref="HandStartMessage"/>
-	/// </summary>
-	class HandActionMessage
-	{
-	public:
-		/// <summary>
-		/// Hand game number
-		/// </summary>
-		uint64_t GameNumber() const {
-			return game_id_;
-		}
-		/// <summary>
-		/// Hand game number
-		/// </summary>
-		void GameNumber(uint64_t gameNumber) {
-			game_id_ = gameNumber;
+		mutable std::string  player_id_str_;
+		void MakeH2NApiSeatInfo(h2n_seat_info* s) const {
+			s->is_dealer = is_dealer_ ? 1 : 0;
+			s->is_hero = is_hero_ ? 1 : 0;
+			s->is_posted_bb = is_posted_bb_ ? 1 : 0;
+			s->is_posted_bb_outofqueue = is_posted_bb_outofqueue_ ? 1 : 0;
+			s->is_posted_sb = is_posted_sb_ ? 1 : 0;
+			s->is_posted_sb_outofqueue = is_posted_sb_outofqueue_ ? 1 : 0;
+			s->is_posted_straddle = is_posted_straddle_ ? 1 : 0;
+			s->is_sitting_out = is_sitting_out_ ? 1 : 0;
+			s->nickname = nickname_.c_str();
+			player_id_str_ = std::to_string(player_id_);
+			s->player_id = player_id_str_.c_str();
+			s->pocket_cards = pocket_cards_.c_str();
+			s->seat_idx = seat_idx_;
+			s->stack = stack_;
 		}
 
-		/// <summary>
-		/// Action seat index in range [0..MaxPlayers-1]
-		/// </summary>
-		int SeatIndex() const {
-			return seat_idx_;
-		}
-		/// <summary>
-		/// Action seat index in range [0..MaxPlayers-1]
-		/// </summary>
-		void SeatIndex(int seatIndex) {
-			seat_idx_ = seatIndex;
-		}
+		friend class HandStartMessage;
 
-		/// <summary>
-		/// Action type. Fold/Check/Raise etc
-		/// </summary>
-		Actions ActionType() const {
-			return type_;
-		}
-		/// <summary>
-		/// Action type. Fold/Check/Raise etc
-		/// </summary>
-		void ActionType(Actions actionType) {
-			type_ = actionType;
-		}
-
-		/// <summary>
-		/// Call/Bet/Raise amount. If the ActionType is raise then Amount should contain the value "raised to", i.e. the current bet amount of the player .
-		/// </summary>
-		double Amount() const {
-			return amount_;
-		}
-		/// <summary>
-		/// Call/Bet/Raise amount. If the ActionType is raise then Amount should contain the value "raised to", i.e. the current bet amount of the player .
-		/// </summary>
-		void Amount(double amount) {
-			amount_ = amount;
-		}
-
-		HandActionMessage() { }
-	private:
-		uint64_t    game_id_{ 0 };
-		int         seat_idx_{ -1 };
-		Actions     type_{ Actions::Fold };
-		double      amount_{ 0 };
 	};
 
-	static inline int Send(const HandActionMessage& msg)
-	{
-		h2n_action_message m;
-		m.amount = msg.Amount();
-		m.gameid = (double)msg.GameNumber();
-		m.is_allin = 0;
-		m.pot = 0;
-		m.seat_idx = msg.SeatIndex();
-		m.type = (int)msg.ActionType();
-		return h2n_send_action(&m);
-	}
-
-
-	/// <summary>
-	/// Send dynamic poker street message to Hand2Note, used with <see cref="HandActionMessage"/> to maintain dynamic deal state after <see cref="HandStartMessage"/>
-	/// </summary>
-	class HandDealMessage
-	{
+	class HandStartMessage {
 	public:
-		/// <summary>
-		/// Game/Hand number
-		/// </summary>
-		uint64_t GameNumber() const {
-			return game_id_;
-		}
-		/// <summary>
-		/// Game/Hand number
-		/// </summary>
-		void GameNumber(uint64_t gameNumber) {
-			game_id_ = gameNumber;
-		}
+		typedef std::vector<SeatInfo> SeatsList;
 
-		/// <summary>
-		/// Street type. Flop/Turn/River
-		/// </summary>
-		Streets Street() const {
-			return type_;
-		}
-		/// <summary>
-		/// Street type. Flop/Turn/River
-		/// </summary>
-		void Street(Streets street) {
-			type_ = street;
-		}
+		HandStartMessage() :
+			room_(Room::PokerStars), game_id_(0), table_hwnd_(0), max_players_(0),
+			is_tourney_(false), is_omaha_(false), is_limit_(false), is_zoom_(false),
+			is_cap_(false), is_potlimit_(false), currency_(Currency::Dollar), sb_(0), bb_(0),
+			ante_(0), straddle_(0)
+		{}
+		HandStartMessage(Room room, uint64 gameid = 0, int table_hwnd = 0) :
+			room_(room), game_id_(gameid), table_hwnd_(table_hwnd), max_players_(0),
+			is_tourney_(false), is_omaha_(false), is_limit_(false), is_zoom_(false),
+			is_cap_(false), is_potlimit_(false), currency_(Currency::Dollar), sb_(0), bb_(0),
+			ante_(0), straddle_(0)
+		{}
 
-		/// <summary>
-		/// Board cards string in common format '5cQdTh'. 3 cards for flop, 4 for turn, 5 for river
-		/// </summary>
-		const std::string& Board() const {
-			return board_;
-		}
-		/// <summary>
-		/// Board cards string in common format '5cQdTh'. 3 cards for flop, 4 for turn, 5 for river
-		/// </summary>
-		void Board(const std::string& board) {
-			board_ = board;
-		}
+		Room room() const {	return room_; }
+		void room(Room r) {	room_ = r; }
 
-		/// <summary>
-		/// Total pot value on street. Is not required for hands without rake.
-		/// </summary>
-		double Pot() const {
-			return pot_;
-		}
-		/// <summary>
-		/// Total pot value on street. Is not required for hands without rake.
-		/// </summary>
-		void Pot(double pot) {
-			pot_ = pot;
-		}
+		uint64_t GameId() const { return game_id_; }
+		void GameId(uint64_t id) { game_id_ = id; }
 
-		HandDealMessage() { }
+		const std::string& TableName() const { return table_name_; }
+		void TableName(const std::string& name) { table_name_ = name; }
+
+		int TableHwnd() const { return table_hwnd_; }
+		void TableHwnd(int hwnd) { table_hwnd_ = hwnd; }
+
+		int MaxPlayers() const { return max_players_; }
+		void MaxPlayers(int max_players) { max_players_ = max_players; }
+		
+		bool IsTourney() const { return is_tourney_; }
+		void SetTourney(bool tourney) { is_tourney_ = tourney; }
+
+		bool IsOmaha() const { return is_omaha_; }
+		void SetOmaha(bool omaha) { is_omaha_ = omaha; }
+
+		bool IsLimit() const { return is_limit_; }
+		void SetLimit(bool lim) { is_limit_ = lim; }
+
+		bool IsZoom() const { return is_zoom_; }
+		void SetZoom(bool z) { is_zoom_ = z; }
+
+		bool IsCap() const { return is_cap_; }
+		void SetCap(bool cap) { is_cap_ = cap; }
+
+		bool IsPotLimit() const { return is_potlimit_; }
+		void SetPotLimit(bool potlim) { is_potlimit_ = potlim; }
+
+		Currency currency() const { return currency_; }
+		void SetCurrency(Currency curr) { currency_ = curr; }
+
+		double SmallBlind() const { return sb_; }
+		void SmallBlind(double sb) { sb_ = sb; }
+
+		double BigBlind() const { return bb_; }
+		void BigBlind(double bb) { bb_ = bb; }
+
+		double Ante() const { return ante_; }
+		void Ante(double ante) { ante_ = ante; }
+
+		double Straddle() const { return straddle_; }
+		void Straddle(double straddle) { straddle_ = straddle; }
+
+		void Seats(const SeatsList& seats) { seats_ = seats; }
+		const SeatsList& Seats() const { return seats_; }
 	private:
-		uint64_t    game_id_{ 0 };
-		Streets     type_{ Streets::Preflop };
-		std::string board_;
-		double      pot_{ 0 };
+		Room        room_;
+		uint64      game_id_;
+		std::string table_name_;
+		int         table_hwnd_;
+		int         max_players_;
+		bool        is_tourney_;
+		bool        is_omaha_;
+		bool        is_limit_;
+		bool        is_zoom_;
+		bool        is_cap_;
+		bool        is_potlimit_;
+		Currency    currency_;
+		double      sb_;
+		double      bb_;
+		double      ante_;
+		double      straddle_;
+		SeatsList   seats_;
+
+		friend class Protocol;
+
+		void MakeH2NApiLibMessage(h2n_start_hand_message* msg) const {
+			msg->ante = ante_;
+			msg->bb = bb_;
+			msg->currency = (int)currency_;
+			msg->gameid = (double)game_id_;
+			msg->is_cap = is_cap_ ? 1 : 0;
+			msg->is_limit = is_limit_ ? 1 : 0;
+			msg->is_omaha = is_omaha_ ? 1 : 0;
+			msg->is_potlimit = is_potlimit_ ? 1 : 0;
+			msg->is_tourney = is_tourney_ ? 1 : 0;
+			msg->is_zoom = is_zoom_ ? 1 : 0;
+			msg->max_players = max_players_;
+			msg->room = (int)room_;
+			msg->sb = sb_;
+			msg->straddle = straddle_;
+			msg->table_hwnd = table_hwnd_;
+			msg->table_name = table_name_.c_str();
+
+			msg->seats_num = 0;
+			for (SeatsList::const_iterator it = seats_.cbegin(); it != seats_.cend(); ++it) {
+				it->MakeH2NApiSeatInfo( &(msg->seats[msg->seats_num++]));
+			}
+		}
 	};
 
-	static inline int Send(const HandDealMessage& msg)
+	enum class Action : int
 	{
-		h2n_street_message m;
-		m.board = msg.Board().c_str();
-		m.gameid = (double)msg.GameNumber();
-		m.pot = msg.Pot();
-		m.type = (int)msg.Street();
-		return h2n_send_street(&m);
-	}
+		Fold = H2N_ACTION_FOLD,
+		Call = H2N_ACTION_CALL,
+		Raise = H2N_ACTION_RAISE,
+		Bet = H2N_ACTION_BET,
+		Check = H2N_ACTION_CHECK,
+	};
 
-
-	static inline int Send(int TableHwnd, Rooms room, Commands command)
+	enum class Street : int
 	{
-		return h2n_send_command(TableHwnd, (int)room, (int)command);
-	}
+		Flop = H2N_STREET_FLOP,
+		Turn = H2N_STREET_TURN,
+		River = H2N_STREET_RIVER,
+	};
 
+	class HandActionMessage {
+	public:
+		HandActionMessage() :
+			game_id_(0), seat_idx_(0), type_(Action::Fold), amount_(0), is_allin_(false), pot_(0)
+		{
+		}
+
+		HandActionMessage(uint64_t game_id, int seat_id, Action type, double amount, bool is_allin = false) :
+			game_id_(game_id), seat_idx_(seat_id), type_(type), amount_(amount), is_allin_(is_allin), pot_(0)
+		{
+		}
+
+		uint64_t GameId() const { return game_id_; }
+		void GameId(uint64_t id) { game_id_ = id; }
+
+		int SeatIndex() const { return seat_idx_; }
+		void SeatIndex(int idx) { seat_idx_ = idx; }
+
+		Action ActionType() const { return type_; }
+		void ActionType(Action type) { type_ = type; }
+
+		double Amount() const { return amount_; }
+		void Amount(double val) { amount_ = val; }
+
+		bool IsAllin() const { return is_allin_; }
+		void SetAllin(bool allin) { is_allin_ = allin; }
+
+		double Pot() const { return pot_; }
+		void Pot(double val) { pot_ = val; }
+
+	private:
+		uint64      game_id_;
+		int         seat_idx_;
+		Action      type_;
+		double      amount_;
+		bool        is_allin_;
+		double      pot_;
+
+		void MakeH2NApiLibMessage(h2n_action_message* msg) const {
+			msg->amount = amount_;
+			msg->gameid = (double)game_id_;
+			msg->is_allin = is_allin_ ? 1 : 0;
+			msg->pot = pot_;
+			msg->seat_idx = seat_idx_;
+			msg->type = (int)type_;
+		}
+
+		friend class Protocol;
+	};
+
+	class HandStreetMessage {
+	public:
+		HandStreetMessage() :
+			game_id_(0), type_(Street::Flop), pot_(0)
+		{
+		}
+
+		HandStreetMessage(uint64_t game_id, Street type, const std::string& board, double pot = 0) :
+			game_id_(game_id), type_(type), board_(board), pot_(0)
+		{
+		}
+
+		uint64_t GameId() const { return game_id_; }
+		void GameId(uint64_t id) { game_id_ = id; }
+
+		const std::string& Board() const { return board_; }
+		void Board(const std::string& board) { board_ = board; }
+
+		Street StreetType() const { return type_; }
+		void StreetType(Street type) { type_ = type; }
+
+		double Pot() const { return pot_; }
+		void Pot(double val) { pot_ = val; }
+
+	private:
+		uint64      game_id_;
+		Street      type_;
+		str         board_;
+		double      pot_;
+
+		void MakeH2NApiLibMessage(h2n_street_message* msg) const {
+			msg->gameid = (double)game_id_;
+			msg->board = board_.c_str();
+			msg->type = (int)type_;
+			msg->pot = pot_;
+		}
+
+		friend class Protocol;
+	};
+
+
+	class Protocol {
+	public:
+		inline static int SendHandHistory(const HandHistoryMessage& msg) {
+			h2n_hh_message m;
+			msg.MakeH2NApiLibMessage(&m);
+			return h2n_send_handhistory(&m);
+		}
+		inline static int SendHandStart(const HandStartMessage& msg) {
+			h2n_start_hand_message m;
+			msg.MakeH2NApiLibMessage(&m);
+			return h2n_send_hand_start(&m);
+		}
+		inline static int SendHandActon(const HandActionMessage& msg) {
+			h2n_action_message m;
+			msg.MakeH2NApiLibMessage(&m);
+			return h2n_send_action(&m);
+		}
+		inline static int SendHandStreed(const HandStreetMessage& msg) {
+			h2n_street_message m;
+			msg.MakeH2NApiLibMessage(&m);
+			return h2n_send_street(&m);
+		}
+
+	};
 }
 
 

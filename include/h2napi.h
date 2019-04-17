@@ -114,6 +114,8 @@ extern "C" {
 
 #define H2N_COMMAND_CLOSEHUD 0
 #define H2N_COMMAND_REOPENTABLE 3
+#define H2N_COMMAND_RESTARTEMULATOR 4
+
 
 #define H2N_MAX_SEATS 10
 
@@ -157,6 +159,8 @@ typedef struct {
 	int         is_zoom;
 	int         is_cap;
 	int         is_potlimit;
+	int         is_shortdeck;
+	int         is_omahafive;
 
 	int         currency;
 

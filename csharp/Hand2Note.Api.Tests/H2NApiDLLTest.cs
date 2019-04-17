@@ -344,6 +344,8 @@ Seat 8: 德州小丑王 (small blind) folded on the Turn
             Assert.IsFalse(msg.IsPotLimit);
             Assert.IsFalse(msg.IsTourney);
             Assert.IsFalse(msg.IsZoom);
+            Assert.IsFalse(msg.IsShortDeck);
+            Assert.IsFalse(msg.IsOmahaFive);
 
             var hash = new MurmurHash();
 
@@ -439,7 +441,7 @@ Seat 8: 德州小丑王 (small blind) folded on the Turn
             // -------------------------------------------------------------------
             // ok we need to assign 'hand start' message to some window via HWND
             // open notepad, find notepad window handle with spy++ and setup msg.TableWindowHwnd
-            msg.TableWindowHwnd = 0x00B1235C;
+            msg.TableWindowHwnd = 0x00161404;
             if (WinApiHelper.IsWindow((IntPtr)msg.TableWindowHwnd) == 0)
             {
                 Console.WriteLine("HandStart Message requires valid window handle");

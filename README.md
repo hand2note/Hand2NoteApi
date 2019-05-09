@@ -60,6 +60,6 @@ if (Hand2Note.IsHand2NoteRunning()){
 
 //Use Activity monitor to know when Hand2Note client was started or closed
 var activityMonitor = new ActivityMonitor();
-activityMonitory.Hand2NoteStarted += Hand2NoteStartedHandler;
-activityMonitory.Hand2NoteClosed += Hand2NoteClosedHandler;
+activityMonitor.Hand2NoteStarted += Hand2NoteStartedHandler;
+activityMonitor.Hand2NoteClosed += Hand2NoteClosedHandler;
 ```

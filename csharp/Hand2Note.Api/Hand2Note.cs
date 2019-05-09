@@ -66,6 +66,7 @@ namespace Hand2Note.Api
                 msg.is_potlimit = message.IsPotLimit ? 1 : 0;
                 msg.is_shortdeck = message.IsShortDeck ? 1 : 0;
                 msg.is_omahafive = message.IsOmahaFive ? 1 : 0;
+                msg.is_straightbeatstrips = message.IsStraightBeatsTrips ? 1 : 0;
                 msg.is_tourney = message.IsTourney ? 1 : 0;
                 msg.is_zoom = message.IsZoom ? 1 : 0;
                 msg.max_players = message.TableSize;
@@ -324,6 +325,7 @@ namespace Hand2Note.Api
             public int is_potlimit;
             public int is_shortdeck;
             public int is_omahafive;
+            public int is_straightbeatstrips;
             public int currency;
             public double sb;
             public double bb;

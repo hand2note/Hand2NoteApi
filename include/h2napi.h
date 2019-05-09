@@ -87,6 +87,10 @@ extern "C" {
 #define H2N_ROOM_ONEPS 65
 #define H2N_ROOM_POKERCLANS 66
 #define H2N_ROOM_KKPOKER 67
+#define H2N_ROOM_POKERCOMMUNITY 68
+#define H2N_ROOM_REDDRAGON 69
+#define H2N_ROOM_WEPOKER 70
+#define H2N_ROOM_POTATOPOKER 71
 
 #define H2N_CURRENCY_DOLLAR 1
 #define H2N_CURRENCY_EURO 2
@@ -161,6 +165,7 @@ typedef struct {
 	int         is_potlimit;
 	int         is_shortdeck;
 	int         is_omahafive;
+	int         is_straightbeatstrips;
 
 	int         currency;
 

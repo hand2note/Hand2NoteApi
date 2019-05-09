@@ -60,6 +60,10 @@ namespace Hand2Note.Api
         /// </summary>
         public bool IsShortDeck { set; get; } = false;
         /// <summary>
+        /// Is Straight beats Trips in short deck holdem
+        /// </summary>
+        public bool IsStraightBeatsTrips { set; get; } = true;
+        /// <summary>
         /// Is it omaha5 game
         /// </summary>
         public bool IsOmahaFive { set; get; } = false;
@@ -83,6 +87,8 @@ namespace Hand2Note.Api
         /// Straddle amount
         /// </summary>
         public double Straddle { set; get; } = 0;
+
+        
 
         /// <summary>
         /// List of table seats.

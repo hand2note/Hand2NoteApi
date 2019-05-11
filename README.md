@@ -1,5 +1,8 @@
 # Hand2Note API
+
 Contains Hand2Note API for third party tools integration.
+
+Hand2Note is an online poker HUD software at https://hand2note.com
 
 Currently available on C# and C++.
 
